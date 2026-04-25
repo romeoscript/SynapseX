@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Build
+dist/
+build/
+
+# Turbo
+.turbo/
+
+# Environment (all variants)
+.env
+.env.*
+!.env.example
+
+# Database
+*.db
+*.db-journal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Debug
+npm-debug.log*
+pnpm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Agent state
+.publisher-state.json
+.consumer-state.json
+
+# Local dev agents
+agents/_local/
+
+# Internal project files
+CLAUDE.md
+AGENTS.md
+apps/arena/src/db/seed.ts

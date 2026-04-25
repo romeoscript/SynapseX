@@ -1,0 +1,22 @@
+{
+  "name": "ethy-arena",
+  "private": true,
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "unrs-resolver"
+    ]
+  },
+  "scripts": {
+    "dev": "pnpm --filter arena dev",
+    "build": "pnpm --filter arena build",
+    "publisher": "pnpm --filter publisher-ethy start",
+    "consumer": "pnpm --filter consumer start",
+    "db:push": "pnpm --filter arena db:push",
+    "db:generate": "pnpm --filter arena db:generate"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}

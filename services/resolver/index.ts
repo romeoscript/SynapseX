@@ -8,17 +8,14 @@
  * Runs on a 5-minute interval. Deployed as a standalone Railway service.
  *
  * Required env:
- *   DATABASE_URL       — PostgreSQL connection string
- *   OKX_API_KEY        — OKX Web3 API key
- *   OKX_SECRET_KEY     — OKX HMAC secret
- *   OKX_PASSPHRASE     — OKX passphrase
- *   OKX_PROJECT_ID     — OKX project ID (optional)
+ *   DATABASE_URL  — PostgreSQL connection string
+ *
+ * Price feeds via Binance public API (no auth required).
  */
 
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 import { eq, and } from "drizzle-orm"
-import { createHmac } from "crypto"
 import {
   pgTable, text, integer, doublePrecision, serial, index,
 } from "drizzle-orm/pg-core"
@@ -84,53 +81,24 @@ const activity = pgTable("activity", {
   createdAt: text("created_at").notNull(),
 })
 
-// ── OKX Market Client (HMAC-authenticated) ──
+// ── Market Data (Binance public API — no auth) ──
 
-const OKX_BASE = "https://web3.okx.com"
-let timeOffset = 0
-let synced = false
+const BINANCE_BASE = "https://api.binance.com/api/v3"
 
-async function syncTime(): Promise<void> {
-  try {
-    const before = Date.now()
-    const res = await fetch(`${OKX_BASE}/api/v5/public/time`)
-    const data = (await res.json()) as { data: Array<{ ts: string }> }
-    const latency = (Date.now() - before) / 2
-    timeOffset = Number(data.data[0].ts) - Date.now() + latency
-  } catch {
-    console.warn("  Clock sync failed, using local time")
-  }
+const ADDRESS_TO_BINANCE: Record<string, string> = {
+  "0x4200000000000000000000000000000000000006": "ETHUSDT",
+  "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": "BTCUSDT",
+  "0x940181a94a35a4569e4529a3cdfb74e38fd98631": "AEROUSDT",
 }
-
-async function okxFetch<T>(method: "GET", path: string): Promise<T> {
-  if (!synced) { await syncTime(); synced = true; setInterval(syncTime, 30_000) }
-
-  const timestamp = new Date(Date.now() + timeOffset).toISOString()
-  const secret = process.env.OKX_SECRET_KEY!
-  const signature = createHmac("sha256", secret).update(timestamp + method + path).digest("base64")
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "OK-ACCESS-KEY": process.env.OKX_API_KEY!,
-    "OK-ACCESS-SIGN": signature,
-    "OK-ACCESS-TIMESTAMP": timestamp,
-    "OK-ACCESS-PASSPHRASE": process.env.OKX_PASSPHRASE!,
-  }
-  if (process.env.OKX_PROJECT_ID) headers["OK-ACCESS-PROJECT"] = process.env.OKX_PROJECT_ID
-
-  const res = await fetch(`${OKX_BASE}${path}`, { method, headers })
-  if (!res.ok) throw new Error(`OKX ${path} → ${res.status}`)
-  return res.json() as Promise<T>
-}
-
-type OKXCandle = [string, string, string, string, string, string, string, string]
 
 async function getCurrentPrice(tokenAddress: string): Promise<number | null> {
+  const symbol = ADDRESS_TO_BINANCE[tokenAddress.toLowerCase()]
+  if (!symbol) return null
   try {
-    const path = `/api/v6/dex/market/candles?chainIndex=196&tokenContractAddress=${tokenAddress}&bar=1m&limit=1`
-    const data = await okxFetch<{ code: string; data: OKXCandle[] }>("GET", path)
-    if (data.code !== "0" || !data.data?.length) return null
-    return Number(data.data[0][4]) // close price
+    const res = await fetch(`${BINANCE_BASE}/ticker/price?symbol=${symbol}`)
+    if (!res.ok) return null
+    const data = await res.json() as { price: string }
+    return Number(data.price)
   } catch {
     return null
   }

@@ -1,6 +1,5 @@
 /**
- * Market data via OnchainOS CLI.
- * Replaces custom OKX HMAC-SHA256 auth with `onchainos market kline`.
+ * Market data via OnchainOS CLI (chain: "base").
  */
 
 import { getMarketKline } from "@ethy-arena/shared"
@@ -14,23 +13,14 @@ export type Candle = {
   volume: number
 }
 
-/** Fetch candlestick data for a token on X Layer via OnchainOS. */
-export async function getCandles(
-  tokenAddress: string,
-  bar = "15m",
-  limit = 100,
-): Promise<Candle[]> {
-  const result = await getMarketKline(tokenAddress, "xlayer", bar, limit)
-
+export async function getCandles(tokenAddress: string, bar = "15m", limit = 100): Promise<Candle[]> {
+  const result = await getMarketKline(tokenAddress, "base", bar, limit)
   if (!result.ok || !result.data) {
     console.error("  OnchainOS market kline error:", result.error)
     return []
   }
-
-  const data = result.data
-  if (!Array.isArray(data)) return []
-
-  return data.map((c) => ({
+  if (!Array.isArray(result.data)) return []
+  return result.data.map((c) => ({
     timestamp: Number(c.ts),
     open: Number(c.o),
     high: Number(c.h),

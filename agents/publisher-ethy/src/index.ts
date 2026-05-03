@@ -10,7 +10,7 @@
  * Usage: pnpm publisher (15min intervals)
  */
 
-import { XLAYER_TOKENS, XLAYER_RPC } from "@ethy-arena/shared"
+import { BASE_TOKENS as XLAYER_TOKENS, BASE_RPC as XLAYER_RPC } from "@ethy-arena/shared"
 import {
   loadPublisherState,
   registerPublisher,

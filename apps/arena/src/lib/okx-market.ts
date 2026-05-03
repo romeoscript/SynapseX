@@ -1,13 +1,15 @@
-import { okxFetch } from "./okx-client"
-import { XLAYER_CHAIN_ID } from "@ethy-arena/shared"
+/**
+ * Market data via Binance public API (no auth) + CoinGecko fallback.
+ * No API key required.
+ */
 
-type OKXResponse<T> = {
-  code: string
-  data: T
+const BINANCE_BASE = "https://api.binance.com/api/v3"
+
+const ADDRESS_TO_BINANCE: Record<string, string> = {
+  "0x4200000000000000000000000000000000000006": "ETHUSDT",
+  "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": "BTCUSDT",
+  "0x940181a94a35a4569e4529a3cdfb74e38fd98631": "AEROUSDT",
 }
-
-type RawCandle = [string, string, string, string, string, string, string, string]
-// [timestamp, open, high, low, close, volume, volumeUsd, confirm]
 
 export type Candle = {
   timestamp: number
@@ -20,34 +22,52 @@ export type Candle = {
   confirmed: boolean
 }
 
-function parseCandle(raw: RawCandle): Candle {
-  return {
-    timestamp: Number(raw[0]),
-    open: Number(raw[1]),
-    high: Number(raw[2]),
-    low: Number(raw[3]),
-    close: Number(raw[4]),
-    volume: Number(raw[5]),
-    volumeUsd: Number(raw[6]),
-    confirmed: raw[7] === "1",
+async function coingeckoPrice(tokenAddress: string): Promise<number | null> {
+  try {
+    const url = `https://api.coingecko.com/api/v3/simple/token_price/base?contract_addresses=${tokenAddress}&vs_currencies=usd`
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const data = await res.json() as Record<string, { usd: number }>
+    return data[tokenAddress.toLowerCase()]?.usd ?? null
+  } catch {
+    return null
   }
 }
 
-/** Fetch candlestick data for a token on X Layer. */
-export async function getCandles(
-  tokenAddress: string,
-  bar = "15m",
-  limit = 100,
-): Promise<Candle[]> {
-  const path = `/api/v6/dex/market/candles?chainIndex=${XLAYER_CHAIN_ID}&tokenContractAddress=${tokenAddress}&bar=${bar}&limit=${limit}`
-  const res = await okxFetch<OKXResponse<RawCandle[]>>("GET", path)
-  if (res.code !== "0" || !res.data?.length) return []
-  return res.data.map(parseCandle)
+export async function getCandles(tokenAddress: string, bar = "15m", limit = 100): Promise<Candle[]> {
+  const symbol = ADDRESS_TO_BINANCE[tokenAddress.toLowerCase()]
+  if (!symbol) return []
+  const intervalMap: Record<string, string> = { "1m": "1m", "5m": "5m", "15m": "15m", "1H": "1h", "4H": "4h", "1D": "1d" }
+  const interval = intervalMap[bar] ?? "15m"
+  try {
+    const res = await fetch(`${BINANCE_BASE}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`)
+    if (!res.ok) return []
+    const data = await res.json() as [number, string, string, string, string, string][]
+    return data.map((c) => ({
+      timestamp: c[0],
+      open: Number(c[1]),
+      high: Number(c[2]),
+      low: Number(c[3]),
+      close: Number(c[4]),
+      volume: Number(c[5]),
+      volumeUsd: 0,
+      confirmed: true,
+    }))
+  } catch {
+    return []
+  }
 }
 
-/** Get the current price (latest close) for a token on X Layer. */
 export async function getCurrentPrice(tokenAddress: string): Promise<number | null> {
-  const candles = await getCandles(tokenAddress, "1m", 1)
-  if (candles.length === 0) return null
-  return candles[0].close
+  const symbol = ADDRESS_TO_BINANCE[tokenAddress.toLowerCase()]
+  if (symbol) {
+    try {
+      const res = await fetch(`${BINANCE_BASE}/ticker/price?symbol=${symbol}`)
+      if (res.ok) {
+        const data = await res.json() as { price: string }
+        return Number(data.price)
+      }
+    } catch { /* fall through to CoinGecko */ }
+  }
+  return coingeckoPrice(tokenAddress)
 }

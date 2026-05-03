@@ -1,4 +1,4 @@
-import { XLAYER_RPC } from "@ethy-arena/shared"
+import { BASE_RPC as XLAYER_RPC } from "@ethy-arena/shared"
 
 const MAX_TX_AGE_MS = 10 * 60 * 1000 // 10 minutes
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"

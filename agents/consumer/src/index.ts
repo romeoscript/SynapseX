@@ -9,11 +9,11 @@
  */
 
 import { ethers } from "ethers"
-import { XLAYER_RPC, USDT_ADDRESS } from "@ethy-arena/shared"
+import { BASE_RPC as XLAYER_RPC, USDC_ADDRESS as USDT_ADDRESS } from "@ethy-arena/shared"
 import type { Signal, Position, PositionStatus } from "@ethy-arena/shared"
 import { createWalletClient, http, publicActions } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
-import { xLayer } from "viem/chains"
+import { base } from "viem/chains"
 import { wrapFetchWithPayment, x402Client } from "@okxweb3/x402-fetch"
 import { ExactEvmScheme } from "@okxweb3/x402-evm"
 import { decodePaymentResponseHeader } from "@okxweb3/x402-core/http"
@@ -262,7 +262,7 @@ async function main() {
   )
   const viemWallet = createWalletClient({
     account,
-    chain: xLayer,
+    chain: base,
     transport: http(XLAYER_RPC),
   }).extend(publicActions)
 
@@ -286,7 +286,7 @@ async function main() {
   const client = x402Client.fromConfig({
     schemes: [
       {
-        network: "eip155:196",
+        network: "eip155:8453",
         client: new ExactEvmScheme(signer),
         x402Version: 2,
       },

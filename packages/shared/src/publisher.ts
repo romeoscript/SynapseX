@@ -1,10 +1,10 @@
 /**
  * Shared publisher agent utilities.
- * Used by publisher-ethy and _local (AlphaQuant) agents.
+ * Swaps via OnchainOS CLI (chain: "base"). x402 signing for USDC on Base.
  */
 
 import { ethers } from "ethers"
-import { USDT_ADDRESS } from "./constants.js"
+import { USDC_ADDRESS } from "./constants.js"
 import { swapExecute, onchainos } from "./onchainos.js"
 import { readFileSync, writeFileSync, existsSync } from "fs"
 
@@ -21,18 +21,10 @@ export type PublisherState = {
 
 export function loadPublisherState(stateFile: string, wallet: string): PublisherState | null {
   if (process.env.PUBLISHER_API_KEY) {
-    return {
-      agentId: wallet.toLowerCase(),
-      apiKey: process.env.PUBLISHER_API_KEY,
-      registeredAt: "env",
-    }
+    return { agentId: wallet.toLowerCase(), apiKey: process.env.PUBLISHER_API_KEY, registeredAt: "env" }
   }
   if (!existsSync(stateFile)) return null
-  try {
-    return JSON.parse(readFileSync(stateFile, "utf-8"))
-  } catch {
-    return null
-  }
+  try { return JSON.parse(readFileSync(stateFile, "utf-8")) } catch { return null }
 }
 
 export function savePublisherState(stateFile: string, state: PublisherState) {
@@ -40,6 +32,7 @@ export function savePublisherState(stateFile: string, state: PublisherState) {
   console.log(`  State saved to ${stateFile}`)
 }
 
+// EIP-3009 signing for USDC on Base
 export async function signX402Payment(
   wallet: ethers.Wallet,
   accept: { maxAmountRequired: string; asset: string; payTo: string; chainIndex: string },
@@ -48,12 +41,7 @@ export async function signX402Payment(
   const validBefore = String(Math.floor(Date.now() / 1000) + 300)
 
   const signature = await wallet.signTypedData(
-    {
-      name: "USD₮0",
-      version: "1",
-      chainId: Number(accept.chainIndex),
-      verifyingContract: accept.asset,
-    },
+    { name: "USD Coin", version: "2", chainId: Number(accept.chainIndex), verifyingContract: accept.asset },
     {
       TransferWithAuthorization: [
         { name: "from", type: "address" },
@@ -64,20 +52,13 @@ export async function signX402Payment(
         { name: "nonce", type: "bytes32" },
       ],
     },
-    {
-      from: wallet.address,
-      to: accept.payTo,
-      value: accept.maxAmountRequired,
-      validAfter: "0",
-      validBefore,
-      nonce,
-    },
+    { from: wallet.address, to: accept.payTo, value: accept.maxAmountRequired, validAfter: "0", validBefore, nonce },
   )
 
   return {
-    x402Version: 1,
+    x402Version: 2,
     scheme: "exact",
-    chainIndex: accept.chainIndex,
+    network: `eip155:${accept.chainIndex}`,
     payload: {
       signature,
       authorization: {
@@ -101,13 +82,9 @@ export async function registerPublisher(config: {
   stateFile: string
 }): Promise<PublisherState> {
   console.log("\n--- Self-Registration ---")
-  console.log(`  Registering wallet ${config.wallet.address} on Arena...`)
+  console.log(`  Registering ${config.wallet.address} on SynapseX...`)
 
-  const body = {
-    name: config.name,
-    description: config.description,
-    pricePerQuery: config.pricePerQuery,
-  }
+  const body = { name: config.name, description: config.description, pricePerQuery: config.pricePerQuery }
 
   const res402 = await fetch(`${config.arenaUrl}/api/agents/register`, {
     method: "POST",
@@ -115,61 +92,36 @@ export async function registerPublisher(config: {
     body: JSON.stringify(body),
   })
 
-  if (res402.status === 409) {
-    console.log("  Agent already registered. Set PUBLISHER_API_KEY env var.")
-    process.exit(1)
-  }
-
-  if (res402.status !== 402) {
-    const err = await res402.text()
-    throw new Error(`Expected 402, got ${res402.status}: ${err}`)
-  }
+  if (res402.status === 409) { console.log("  Already registered. Set PUBLISHER_API_KEY."); process.exit(1) }
+  if (res402.status !== 402) throw new Error(`Expected 402, got ${res402.status}: ${await res402.text()}`)
 
   const payReqHeader = res402.headers.get("PAYMENT-REQUIRED")
-  if (!payReqHeader) throw new Error("No PAYMENT-REQUIRED header in 402 response")
+  if (!payReqHeader) throw new Error("No PAYMENT-REQUIRED header")
   const payReq = JSON.parse(Buffer.from(payReqHeader, "base64").toString())
   const accept = payReq.accepts[0]
-  console.log(`  Payment required: ${accept.maxAmountRequired}`)
+  console.log(`  Payment required: ${accept.amount} USDC`)
 
-  console.log(`  Signing x402 payment...`)
-  const paymentPayload = await signX402Payment(config.wallet, accept)
-  const paymentHeader = Buffer.from(JSON.stringify(paymentPayload)).toString("base64")
+  const paymentPayload = await signX402Payment(config.wallet, {
+    maxAmountRequired: accept.amount,
+    asset: accept.asset,
+    payTo: accept.payTo,
+    chainIndex: accept.network?.replace("eip155:", "") ?? "8453",
+  })
 
   const res = await fetch(`${config.arenaUrl}/api/agents/register`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-PAYMENT": paymentHeader,
-    },
+    headers: { "Content-Type": "application/json", "X-PAYMENT": Buffer.from(JSON.stringify(paymentPayload)).toString("base64") },
     body: JSON.stringify(body),
   })
 
-  if (!res.ok) {
-    const err = await res.json()
-    throw new Error(`Registration failed: ${JSON.stringify(err)}`)
-  }
+  if (!res.ok) throw new Error(`Registration failed: ${JSON.stringify(await res.json())}`)
 
-  const registration = await res.json() as { agentId: string; apiKey: string }
-  console.log(`  Registered! Agent ID: ${registration.agentId}`)
+  const { agentId, apiKey } = await res.json() as { agentId: string; apiKey: string }
+  console.log(`  Registered! Agent ID: ${agentId}`)
 
-  const state: PublisherState = {
-    agentId: registration.agentId,
-    apiKey: registration.apiKey,
-    registeredAt: new Date().toISOString(),
-  }
+  const state: PublisherState = { agentId, apiKey, registeredAt: new Date().toISOString() }
   savePublisherState(config.stateFile, state)
   return state
-}
-
-async function ensureApproval(wallet: ethers.Wallet, tokenAddress: string, spender: string) {
-  const token = new ethers.Contract(tokenAddress, ERC20_ABI, wallet)
-  const allowance = await token.allowance(wallet.address, spender)
-  if (allowance < BigInt("0xffffffffffffff")) {
-    console.log(`  Approving ${spender.slice(0, 10)}... to spend token...`)
-    const tx = await token.approve(spender, ethers.MaxUint256)
-    await tx.wait(1)
-    console.log(`  Approved!`)
-  }
 }
 
 export async function executePublisherSwap(config: {
@@ -178,17 +130,16 @@ export async function executePublisherSwap(config: {
   swapAmount: string
   wallet: ethers.Wallet
 }): Promise<string | null> {
-  console.log(`  Executing ${config.action} swap on X Layer...`)
+  console.log(`  Executing ${config.action} swap on Base via OnchainOS...`)
 
-  const from = config.action === "BUY" ? USDT_ADDRESS : config.tokenAddress
-  const to = config.action === "BUY" ? config.tokenAddress : USDT_ADDRESS
+  const from = config.action === "BUY" ? USDC_ADDRESS : config.tokenAddress
+  const to = config.action === "BUY" ? config.tokenAddress : USDC_ADDRESS
 
   const result = await swapExecute({
-    from,
-    to,
+    from, to,
     amount: config.swapAmount,
     wallet: config.wallet.address,
-    chain: "xlayer",
+    chain: "base",
     slippage: "1",
   })
 
@@ -199,49 +150,41 @@ export async function executePublisherSwap(config: {
 
   const swapData = Array.isArray(result.data) ? result.data[0] : result.data
   const txData = (swapData as Record<string, unknown>).tx as {
-    to: string; data: string; value: string; gas: string; gasPrice: string
+    to: string; data: string; value: string; gas?: string; gasLimit?: string; gasPrice?: string
   } | undefined
 
-  if (!txData) {
-    console.error("  No TX data in swap response")
-    return null
-  }
+  if (!txData) { console.error("  No TX data in swap response"); return null }
 
   try {
     const approveResult = await onchainos<Array<{ dexContractAddress: string }>>("swap approve", {
-      token: from,
-      amount: config.swapAmount,
-      chain: "xlayer",
+      token: from, amount: config.swapAmount, chain: "base",
     })
     const approveAddr = approveResult.data?.[0]?.dexContractAddress
     if (approveAddr) {
-      await ensureApproval(config.wallet, from, approveAddr)
+      const erc20 = new ethers.Contract(from, ERC20_ABI, config.wallet)
+      const allowance = await erc20.allowance(config.wallet.address, approveAddr)
+      if (allowance < BigInt(config.swapAmount)) {
+        const tx = await erc20.approve(approveAddr, ethers.MaxUint256)
+        await tx.wait(1)
+      }
     }
   } catch (err) {
-    console.error(`  Approval failed:`, err instanceof Error ? err.message : err)
+    console.error(`  Approval error:`, err instanceof Error ? err.message : err)
     return null
   }
 
   try {
-    const nonce = await config.wallet.provider!.getTransactionCount(config.wallet.address)
-
     const tx = await config.wallet.sendTransaction({
       to: txData.to,
       data: txData.data,
       value: txData.value || "0",
-      gasLimit: BigInt(txData.gas),
-      gasPrice: BigInt(txData.gasPrice),
-      nonce,
+      gasLimit: txData.gasLimit ? BigInt(txData.gasLimit) : txData.gas ? BigInt(txData.gas) : undefined,
+      gasPrice: txData.gasPrice ? BigInt(txData.gasPrice) : undefined,
     })
-
     console.log(`  TX sent: ${tx.hash}`)
     const receipt = await tx.wait(1)
-    if (!receipt || receipt.status !== 1) {
-      console.error("  TX reverted!")
-      return null
-    }
-
-    console.log(`  Swap confirmed in block ${receipt.blockNumber}`)
+    if (!receipt || receipt.status !== 1) { console.error("  TX reverted!"); return null }
+    console.log(`  Confirmed in block ${receipt.blockNumber}`)
     return tx.hash
   } catch (err) {
     console.error(`  TX error:`, err instanceof Error ? err.message : err)
@@ -257,11 +200,8 @@ export async function publishSignal(arenaUrl: string, apiKey: string, signal: Re
       body: JSON.stringify(signal),
     })
     const json = await res.json()
-    if (res.ok) {
-      console.log(`  Published: ${json.signalId} (price: $${json.marketPrice})`)
-    } else {
-      console.error(`  Publish failed:`, json)
-    }
+    if (res.ok) console.log(`  Published: ${json.signalId} (price: $${json.marketPrice})`)
+    else console.error(`  Publish failed:`, json)
   } catch (err) {
     console.error(`  Network error:`, err)
   }

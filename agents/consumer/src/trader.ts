@@ -1,16 +1,12 @@
 /**
- * DEX swap execution via OnchainOS CLI (OKX DEX aggregator).
- *
- * Flow:
- * 1. onchainos swap swap  → get unsigned TX data
- * 2. onchainos swap approve → get correct DEX spender address
- * 3. ethers.js approve + sign + broadcast
+ * DEX swap execution via OnchainOS CLI (chain: "base").
  */
 
 import { ethers } from "ethers"
-import { XLAYER_RPC, USDT_ADDRESS, swapExecute, onchainos, getMarketPrice } from "@ethy-arena/shared"
+import { BASE_RPC, USDC_ADDRESS, swapExecute, onchainos, getMarketPrice } from "@ethy-arena/shared"
 
-const provider = new ethers.JsonRpcProvider(XLAYER_RPC)
+const provider = new ethers.JsonRpcProvider(BASE_RPC)
+
 const ERC20_ABI = [
   "function allowance(address,address) view returns (uint256)",
   "function approve(address,uint256) returns (bool)",
@@ -20,10 +16,9 @@ async function ensureApproval(wallet: ethers.Wallet, tokenAddress: string, spend
   const token = new ethers.Contract(tokenAddress, ERC20_ABI, wallet)
   const allowance = await token.allowance(wallet.address, spender)
   if (allowance < BigInt("0xffffffffffffff")) {
-    console.log(`  Approving ${spender.slice(0, 10)}... to spend token...`)
     const tx = await token.approve(spender, ethers.MaxUint256)
     await tx.wait(1)
-    console.log(`  Approved!`)
+    console.log(`  Approved ${spender.slice(0, 10)}...`)
   }
 }
 
@@ -34,13 +29,12 @@ export async function executeSwap(params: {
   wallet: ethers.Wallet
 }): Promise<{ txHash: string; toAmount: string } | null> {
   try {
-    // 1. Get swap TX data from OnchainOS (OKX DEX aggregator)
     const result = await swapExecute({
       from: params.fromToken,
       to: params.toToken,
       amount: params.amount,
       wallet: params.wallet.address,
-      chain: "xlayer",
+      chain: "base",
       slippage: "1",
     })
 
@@ -55,81 +49,55 @@ export async function executeSwap(params: {
     } | undefined
     const toTokenAmount = (data as Record<string, unknown>).toTokenAmount as string | undefined
 
-    if (!txData) {
-      console.error("  No TX data in swap response")
-      return null
-    }
+    if (!txData) { console.error("  No TX data"); return null }
 
-    console.log(`  Swap quote: ${toTokenAmount || "?"} tokens (via OnchainOS)`)
-
-    // 2. Ensure token approval for DEX (get correct spender from onchainos)
+    // Approve DEX spender
     try {
       const approveResult = await onchainos<Array<{ dexContractAddress: string }>>("swap approve", {
-        token: params.fromToken,
-        amount: params.amount,
-        chain: "xlayer",
+        token: params.fromToken, amount: params.amount, chain: "base",
       })
-      const approveAddr = approveResult.data?.[0]?.dexContractAddress
-      if (approveAddr) {
-        await ensureApproval(params.wallet, params.fromToken, approveAddr)
-      }
+      const spender = approveResult.data?.[0]?.dexContractAddress
+      if (spender) await ensureApproval(params.wallet.connect(provider), params.fromToken, spender)
     } catch (err) {
-      console.error(`  Approval failed:`, err instanceof Error ? err.message : err)
+      console.error("  Approval error:", err instanceof Error ? err.message : err)
       return null
     }
 
-    // 3. Sign and send the swap TX
     const signer = params.wallet.connect(provider)
-    const nonce = await provider.getTransactionCount(params.wallet.address)
-
-    const txRequest: ethers.TransactionRequest = {
+    const txResponse = await signer.sendTransaction({
       to: txData.to,
       data: txData.data,
       value: txData.value || "0",
-      nonce,
-    }
-
-    // Use gas fields from response (onchainos may return gas or gasLimit)
-    if (txData.gasLimit) txRequest.gasLimit = BigInt(txData.gasLimit)
-    else if (txData.gas) txRequest.gasLimit = BigInt(txData.gas)
-    if (txData.gasPrice) txRequest.gasPrice = BigInt(txData.gasPrice)
-
-    const txResponse = await signer.sendTransaction(txRequest)
-    console.log(`  Swap TX sent: ${txResponse.hash}`)
-
+      gasLimit: txData.gasLimit ? BigInt(txData.gasLimit) : txData.gas ? BigInt(txData.gas) : undefined,
+      gasPrice: txData.gasPrice ? BigInt(txData.gasPrice) : undefined,
+    })
+    console.log(`  Swap TX: ${txResponse.hash}`)
     const receipt = await txResponse.wait(1)
-    if (!receipt || receipt.status !== 1) {
-      console.error("  TX reverted!")
-      return null
-    }
-
-    console.log(`  Swap confirmed in block ${receipt.blockNumber}`)
+    if (!receipt || receipt.status !== 1) { console.error("  TX reverted!"); return null }
     return { txHash: txResponse.hash, toAmount: toTokenAmount || "0" }
   } catch (err) {
-    console.error("  Swap execution error:", err instanceof Error ? err.message : err)
+    console.error("  Swap error:", err instanceof Error ? err.message : err)
     return null
   }
 }
 
-/** Sell tokens back to USDT (close position). */
 export async function executeSellSwap(params: {
   tokenAddress: string
   tokenAmount: string
   wallet: ethers.Wallet
-}): Promise<{ txHash: string; usdtAmount: string } | null> {
+}): Promise<{ txHash: string; usdcAmount: string } | null> {
   const result = await executeSwap({
     fromToken: params.tokenAddress,
-    toToken: USDT_ADDRESS,
+    toToken: USDC_ADDRESS,
     amount: params.tokenAmount,
     wallet: params.wallet,
   })
   if (!result) return null
-  return { txHash: result.txHash, usdtAmount: result.toAmount }
+  return { txHash: result.txHash, usdcAmount: result.toAmount }
 }
 
-/** Fetch the current price of a token via OnchainOS. */
 export async function getCurrentPrice(tokenAddress: string): Promise<number | null> {
-  const result = await getMarketPrice(tokenAddress, "xlayer")
-  if (!result.ok || !result.data || !result.data.length) return null
+  const result = await getMarketPrice(tokenAddress, "base")
+  if (!result.ok || !result.data?.length) return null
   return parseFloat(result.data[0].price)
 }

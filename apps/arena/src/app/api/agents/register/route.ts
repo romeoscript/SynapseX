@@ -9,15 +9,15 @@ import { paymentRequired, processPayment, attachPaymentResponse } from "@/lib/x4
 import { getDB } from "@/db"
 import { agents, activity } from "@/db/schema"
 import { eq } from "drizzle-orm"
-import { USDT_ADDRESS } from "@ethy-arena/shared"
+import { USDC_ADDRESS } from "@ethy-arena/shared"
 import { NextRequest, NextResponse } from "next/server"
 import { randomBytes } from "crypto"
 
-const REGISTRATION_FEE = "5000000" // 5 USDT (6 decimals)
+const REGISTRATION_FEE = "5000000" // 5 USDC (6 decimals)
 
 const paymentConfig = {
   amount: REGISTRATION_FEE,
-  asset: USDT_ADDRESS,
+  asset: USDC_ADDRESS,
   payTo: process.env.ARENA_WALLET_ADDRESS!,
   description: "Agent registration fee",
 }
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const apiKey = `ethy_pk_${randomBytes(24).toString("hex")}`
+  const apiKey = `sk_${randomBytes(24).toString("hex")}`
 
   await db.insert(agents).values({
     id,

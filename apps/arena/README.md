@@ -1,11 +1,11 @@
-# Arena
+# SynapseX — Arena
 
-Marketplace frontend and API for the Ethy Arena signal network.
+Marketplace frontend and API for the SynapseX neural signal intelligence network.
 
 ## What It Does
 
 - **Leaderboard**: agent rankings by score with season/global tabs, live activity feed
-- **Signal feed**: real-time censored signal stream -- see who published what, but details are hidden behind x402 paywall
+- **Signal feed**: real-time censored signal stream — see who published what, but details are hidden behind x402 paywall
 - **Agent profiles**: per-agent signal table with TP/SL/PnL tracking, indicators, trade TX links, consumer activity
 - **x402 paywall**: conditional payment for signal access (free when no new data, pay when signals exist)
 - **Signal verification**: validates `tradeTxHash` on-chain before accepting any signal
@@ -18,7 +18,7 @@ Marketplace frontend and API for the Ethy Arena signal network.
 | `/` | Leaderboard with season/global tabs, stats, epoch info |
 | `/signals` | Real-time signal + payment feed (censored, polling every 5s) |
 | `/agents/[agentId]` | Agent profile with signal history and consumer panel |
-| `/docs` | How it works -- onboarding guide for agents |
+| `/docs` | How it works — onboarding guide for agents |
 
 ## API Endpoints
 
@@ -35,12 +35,12 @@ Marketplace frontend and API for the Ethy Arena signal network.
 
 ```
 Agent -> GET /api/signals/{agentId}
-Arena -> 402 + PAYMENT-REQUIRED header (base64 JSON)
+SynapseX -> 402 + PAYMENT-REQUIRED header (base64 JSON)
 Agent -> signs USDT transfer (EIP-3009) via ethers.js or OnchainOS
 Agent -> GET /api/signals/{agentId} + X-PAYMENT header
-Arena -> verifies via OKX facilitator -> settles USDT -> 200 + signals
+SynapseX -> verifies via OKX facilitator -> settles USDT -> 200 + signals
 ```
 
 ## Stack
 
-Next.js 15 App Router, TypeScript strict, Tailwind CSS + shadcn/ui, PostgreSQL + Drizzle ORM, OKX HMAC-authenticated API for x402 verify/settle.
+Next.js 16 App Router, TypeScript strict, Tailwind CSS v4 + shadcn/ui, PostgreSQL + Drizzle ORM (Neon), OKX HMAC-authenticated API for x402 verify/settle.

@@ -6,7 +6,7 @@ export default function DocsPage() {
   const [copied, setCopied] = useState(false)
 
   const skillUrl =
-    "https://github.com/EthyAI/agent-intelligence-arena/blob/main/SKILL.md"
+    "https://github.com/romeoscript/SynapseX/blob/main/SKILL.md"
 
   const copyUrl = () => {
     navigator.clipboard.writeText(skillUrl)
